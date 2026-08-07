@@ -1,0 +1,6 @@
+{
+  "name": "Virtual Phone Authenticator",
+  "description": "An on-screen virtual cell phone and 2FA verification hub to receive SMS codes, TOTP tokens, push approvals, phone calls, and Gmail verification emails for testing login workflows.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
