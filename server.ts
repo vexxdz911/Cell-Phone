@@ -9,6 +9,59 @@ const PORT = 3000;
 
 app.use(express.json());
 
+// --- Security Middlewares ---
+// Simple in-memory rate limiter and API key auth to protect mutable endpoints.
+const RATE_LIMIT_WINDOW_MS = parseInt(process.env.RATE_LIMIT_WINDOW_MS || '60000'); // window in ms
+const RATE_LIMIT_MAX = parseInt(process.env.RATE_LIMIT_MAX || '120'); // max requests per window
+const _ipBuckets: Map<string, { count: number; start: number }> = new Map();
+
+function rateLimiter(req: any, res: any, next: any) {
+  try {
+    const ip = (req.ip || req.connection?.remoteAddress || 'unknown').toString();
+    const now = Date.now();
+    const bucket = _ipBuckets.get(ip) || { count: 0, start: now };
+    if (now - bucket.start > RATE_LIMIT_WINDOW_MS) {
+      bucket.count = 1;
+      bucket.start = now;
+    } else {
+      bucket.count++;
+    }
+    _ipBuckets.set(ip, bucket);
+    if (bucket.count > RATE_LIMIT_MAX) {
+      return res.status(429).json({ error: 'Too many requests (rate limit exceeded)' });
+    }
+    next();
+  } catch (err) {
+    // Fail open on unexpected error so legitimate traffic isn't blocked by middleware bugs
+    console.warn('Rate limiter error:', err);
+    next();
+  }
+}
+
+function apiKeyAuth(req: any, res: any, next: any) {
+  const configured = process.env.ADMIN_API_KEY;
+  // If ADMIN_API_KEY not configured, allow in non-production for dev convenience
+  if (!configured) {
+    if (process.env.NODE_ENV === 'production') {
+      return res.status(500).json({ error: 'Server misconfigured: ADMIN_API_KEY not set' });
+    }
+    console.warn('ADMIN_API_KEY not configured; skipping auth (dev only)');
+    return next();
+  }
+
+  const headerKey = (req.headers['x-api-key'] || req.query?.api_key || '').toString();
+  const bearer = (req.headers['authorization'] || '').toString().replace(/^Bearer\s+/i, '');
+  const provided = headerKey || bearer;
+
+  if (!provided || provided !== configured) {
+    return res.status(401).json({ error: 'Unauthorized: invalid API key' });
+  }
+  next();
+}
+
+// Apply rate limiter globally to /api endpoints
+app.use('/api', rateLimiter);
+
 // Initial mock state for phone
 let phoneState: PhoneState = {
   messages: [
@@ -115,7 +168,7 @@ app.get("/api/phone/state", (req, res) => {
 });
 
 // Trigger SMS Code
-app.post("/api/sms/send", (req, res) => {
+app.post("/api/sms/send", apiKeyAuth, (req, res) => {
   const { sender, senderName, body, code, link, externalApp } = req.body;
   
   // Extract 6 digit or 4-8 digit number if code not explicitly provided
@@ -160,7 +213,7 @@ app.post("/api/sms/send", (req, res) => {
 });
 
 // Generic Inbound Webhook / External App Verification Endpoint
-app.post(["/api/webhook/2fa", "/api/integration/send-code"], (req, res) => {
+app.post(["/api/webhook/2fa", "/api/integration/send-code"], apiKeyAuth, (req, res) => {
   const { appName, senderName, body, code, magicLink, type, service } = req.body;
   const sourceApp = appName || senderName || service || "External Application";
 
@@ -233,7 +286,7 @@ app.post(["/api/webhook/2fa", "/api/integration/send-code"], (req, res) => {
 });
 
 // Trigger Push Approval Request
-app.post("/api/push/send", (req, res) => {
+app.post("/api/push/send", apiKeyAuth, (req, res) => {
   const { service, location, ipAddress, promptType, matchingNumber } = req.body;
 
   let numbers: number[] = [];
@@ -272,7 +325,7 @@ app.post("/api/push/send", (req, res) => {
 });
 
 // Respond to push request (Approve/Deny)
-app.post("/api/push/respond", (req, res) => {
+app.post("/api/push/respond", apiKeyAuth, (req, res) => {
   const { id, status, selectedNumber } = req.body;
   const push = phoneState.pushRequests.find((p) => p.id === id);
 
@@ -292,7 +345,7 @@ app.post("/api/push/respond", (req, res) => {
 });
 
 // Trigger Voice Verification Call
-app.post("/api/voice/call", (req, res) => {
+app.post("/api/voice/call", apiKeyAuth, (req, res) => {
   const { caller, callerName, code, spokenMessage } = req.body;
   const verificationCode = code || String(Math.floor(100000 + Math.random() * 900000));
 
@@ -319,7 +372,7 @@ app.post("/api/voice/call", (req, res) => {
 });
 
 // Add TOTP Account
-app.post("/api/totp/add", (req, res) => {
+app.post("/api/totp/add", apiKeyAuth, (req, res) => {
   const { issuer, accountName, secret, icon } = req.body;
   if (!issuer || !secret) {
     return res.status(400).json({ error: "Issuer and secret are required" });
@@ -341,21 +394,21 @@ app.post("/api/totp/add", (req, res) => {
 });
 
 // Delete TOTP Account
-app.post("/api/totp/delete", (req, res) => {
+app.post("/api/totp/delete", apiKeyAuth, (req, res) => {
   const { id } = req.body;
   phoneState.totpAccounts = phoneState.totpAccounts.filter((t) => t.id !== id);
   res.json({ success: true });
 });
 
 // Update Phone Settings
-app.post("/api/phone/settings", (req, res) => {
+app.post("/api/phone/settings", apiKeyAuth, (req, res) => {
   const newSettings = req.body;
   phoneState.settings = { ...phoneState.settings, ...newSettings };
   res.json({ success: true, settings: phoneState.settings });
 });
 
 // Clear notifications / messages
-app.post("/api/phone/clear", (req, res) => {
+app.post("/api/phone/clear", apiKeyAuth, (req, res) => {
   phoneState.messages = [];
   phoneState.pushRequests = [];
   phoneState.calls = [];
@@ -364,7 +417,7 @@ app.post("/api/phone/clear", (req, res) => {
 });
 
 // AI extract verification code from unformatted text/email
-app.post("/api/ai/extract-code", async (req, res) => {
+app.post("/api/ai/extract-code", apiKeyAuth, async (req, res) => {
   try {
     const { rawText } = req.body;
     if (!rawText) {
