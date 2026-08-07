@@ -24,6 +24,6 @@ jobs:
       - name: Run smoke tests
         run: |
           # run a few API smoke checks against the built server (spawn server briefly)
-          node -e "require('./dist/server.cjs'); console.log('server started');" &
-          sleep 2
+          node dist/server.cjs &
+          npx -y wait-on http://localhost:3000
           curl -f http://localhost:3000/api/phone/state
