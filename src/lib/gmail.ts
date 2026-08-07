@@ -17,6 +17,26 @@ export interface ParsedGmailMessage {
   isVerificationEmail: boolean;
 }
 
+/**
+ * Extracted verification data from message text.
+ */
+export interface VerificationData {
+  /**
+   * Extracted numeric verification code, if present (typically 4–8 digits).
+   */
+  code?: string;
+
+  /**
+   * Extracted magic link URL, if present.
+   */
+  magicLink?: string;
+
+  /**
+   * Whether the message appears to be a verification email.
+   */
+  isVerificationEmail: boolean;
+}
+
 // Decode base64url from Gmail payload
 function decodeBase64Url(input: string): string {
   try {
@@ -69,9 +89,9 @@ function extractBodyParts(payload: any): string {
  *
  * @param text Message body text to search.
  * @param subject Message subject to include in the search.
- * @returns An object with { code?, magicLink?, isVerificationEmail }.
+ * @returns VerificationData with code, magicLink, and isVerificationEmail.
  */
-export function parseVerificationData(text: string, subject: string) {
+export function parseVerificationData(text: string, subject: string): VerificationData {
   const combined = `${subject} ${text}`;
 
   // Match 4 to 8 digit verification code
