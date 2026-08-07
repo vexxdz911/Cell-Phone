@@ -6,6 +6,14 @@ export interface TOTPResult {
   period: number;
 }
 
+/**
+ * Generate a TOTP code for a given base32 secret.
+ *
+ * @param secret Base32 or spaced secret string.
+ * @param period Time-step period in seconds (default 30).
+ * @param digits Number of digits to return (default 6).
+ * @returns TOTPResult containing the code, seconds remaining, and period.
+ */
 export function generateTOTP(secret: string, period = 30, digits = 6): TOTPResult {
   try {
     // Clean whitespace
@@ -37,6 +45,11 @@ export function generateTOTP(secret: string, period = 30, digits = 6): TOTPResul
   }
 }
 
+/**
+ * Generate a random TOTP secret (base32).
+ *
+ * @returns A base32 encoded secret string suitable for provisioning.
+ */
 export function generateRandomSecret(): string {
   const secret = new OTPAuth.Secret({ size: 20 });
   return secret.base32;

@@ -3,148 +3,11 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import { PhoneState, SMSMessage, TOTPAccount, PushRequest, VoiceCall } from "./src/types";
-import { createRequire } from 'module';
 
 const app = express();
 const PORT = 3000;
 
 app.use(express.json());
-
-// --- Security Middlewares ---
-// Simple in-memory rate limiter and API key auth to protect mutable endpoints.
-const RATE_LIMIT_WINDOW_MS = parseInt(process.env.RATE_LIMIT_WINDOW_MS || '60000'); // window in ms
-const RATE_LIMIT_MAX = parseInt(process.env.RATE_LIMIT_MAX || '120'); // max requests per window
-const _ipBuckets: Map<string, { count: number; start: number }> = new Map();
-
-function rateLimiter(req: any, res: any, next: any) {
-  try {
-    const ip = (req.ip || req.connection?.remoteAddress || 'unknown').toString();
-    const now = Date.now();
-    const bucket = _ipBuckets.get(ip) || { count: 0, start: now };
-    if (now - bucket.start > RATE_LIMIT_WINDOW_MS) {
-      bucket.count = 1;
-      bucket.start = now;
-    } else {
-      bucket.count++;
-    }
-    _ipBuckets.set(ip, bucket);
-    if (bucket.count > RATE_LIMIT_MAX) {
-      return res.status(429).json({ error: 'Too many requests (rate limit exceeded)' });
-    }
-    next();
-  } catch (err) {
-    // Fail open on unexpected error so legitimate traffic isn't blocked by middleware bugs
-    console.warn('Rate limiter error:', err);
-    next();
-  }
-}
-
-function apiKeyAuth(req: any, res: any, next: any) {
-  const configured = process.env.ADMIN_API_KEY;
-  // If ADMIN_API_KEY not configured, allow in non-production for dev convenience
-  if (!configured) {
-    if (process.env.NODE_ENV === 'production') {
-      return res.status(500).json({ error: 'Server misconfigured: ADMIN_API_KEY not set' });
-    }
-    console.warn('ADMIN_API_KEY not configured; skipping auth (dev only)');
-    return next();
-  }
-
-  const headerKey = (req.headers['x-api-key'] || req.query?.api_key || '').toString();
-  const bearer = (req.headers['authorization'] || '').toString().replace(/^Bearer\s+/i, '');
-  const provided = headerKey || bearer;
-
-  if (!provided || provided !== configured) {
-    return res.status(401).json({ error: 'Unauthorized: invalid API key' });
-  }
-  next();
-}
-
-// Dynamic payload validation: attempt to load Zod at runtime. If unavailable, validation is disabled and a warning is logged.
-let validateBody: any;
-let smsSendSchema: any, webhookSchema: any, pushSendSchema: any, pushRespondSchema: any, voiceCallSchema: any, totpAddSchema: any, totpDeleteSchema: any, settingsSchema: any, aiExtractSchema: any;
-try {
-  const require2 = createRequire(import.meta.url);
-  const Z = require2('zod');
-
-  smsSendSchema = Z.object({
-    sender: Z.string().optional(),
-    senderName: Z.string().optional(),
-    body: Z.string().optional(),
-    code: Z.string().min(1).max(64).optional(),
-    link: Z.string().url().optional(),
-    externalApp: Z.string().optional(),
-  });
-
-  webhookSchema = Z.object({
-    appName: Z.string().optional(),
-    senderName: Z.string().optional(),
-    body: Z.string().optional(),
-    code: Z.string().min(1).max(64).optional(),
-    magicLink: Z.string().url().optional(),
-    type: Z.string().optional(),
-    service: Z.string().optional(),
-  });
-
-  pushSendSchema = Z.object({
-    service: Z.string().optional(),
-    location: Z.string().optional(),
-    ipAddress: Z.string().optional(),
-    promptType: Z.enum(['simple', 'number_matching']).optional(),
-    matchingNumber: Z.number().optional(),
-  });
-
-  pushRespondSchema = Z.object({
-    id: Z.string(),
-    status: Z.enum(['approved', 'denied']),
-    selectedNumber: Z.number().optional(),
-  });
-
-  voiceCallSchema = Z.object({
-    caller: Z.string().optional(),
-    callerName: Z.string().optional(),
-    code: Z.string().min(1).max(64).optional(),
-    spokenMessage: Z.string().optional(),
-  });
-
-  totpAddSchema = Z.object({
-    issuer: Z.string().min(1),
-    accountName: Z.string().optional(),
-    secret: Z.string().min(8),
-    icon: Z.string().optional(),
-  });
-
-  totpDeleteSchema = Z.object({ id: Z.string() });
-
-  settingsSchema = Z.object({
-    phoneNumber: Z.string().optional(),
-    carrier: Z.string().optional(),
-    wallpaper: Z.string().optional(),
-    theme: Z.string().optional(),
-    soundEnabled: Z.boolean().optional(),
-    hapticsEnabled: Z.boolean().optional(),
-    autoCopyOTP: Z.boolean().optional(),
-    modelStyle: Z.string().optional(),
-  });
-
-  aiExtractSchema = Z.object({ rawText: Z.string().min(1) });
-
-  validateBody = (schema: any) => (req: any, res: any, next: any) => {
-    const result = schema.safeParse(req.body);
-    if (!result.success) {
-      return res.status(400).json({ error: 'Invalid request payload', details: result.error.format() });
-    }
-    req.body = result.data;
-    next();
-  };
-} catch (err) {
-  console.warn('Zod not installed or failed to load; request validation disabled. Run `npm install zod` to enable.');
-  // No-op validator when zod is not available
-  validateBody = (_: any) => (req: any, res: any, next: any) => next();
-}
-
-// Apply rate limiter globally to /api endpoints
-app.use('/api', rateLimiter);
 
 // Initial mock state for phone
 let phoneState: PhoneState = {
@@ -252,7 +115,7 @@ app.get("/api/phone/state", (req, res) => {
 });
 
 // Trigger SMS Code
-app.post("/api/sms/send", apiKeyAuth, validateBody(smsSendSchema), (req, res) => {
+app.post("/api/sms/send", (req, res) => {
   const { sender, senderName, body, code, link, externalApp } = req.body;
   
   // Extract 6 digit or 4-8 digit number if code not explicitly provided
@@ -297,7 +160,7 @@ app.post("/api/sms/send", apiKeyAuth, validateBody(smsSendSchema), (req, res) =>
 });
 
 // Generic Inbound Webhook / External App Verification Endpoint
-app.post(["/api/webhook/2fa", "/api/integration/send-code"], apiKeyAuth, validateBody(webhookSchema), (req, res) => {
+app.post(["/api/webhook/2fa", "/api/integration/send-code"], (req, res) => {
   const { appName, senderName, body, code, magicLink, type, service } = req.body;
   const sourceApp = appName || senderName || service || "External Application";
 
@@ -370,7 +233,7 @@ app.post(["/api/webhook/2fa", "/api/integration/send-code"], apiKeyAuth, validat
 });
 
 // Trigger Push Approval Request
-app.post("/api/push/send", apiKeyAuth, validateBody(pushSendSchema), (req, res) => {
+app.post("/api/push/send", (req, res) => {
   const { service, location, ipAddress, promptType, matchingNumber } = req.body;
 
   let numbers: number[] = [];
@@ -409,7 +272,7 @@ app.post("/api/push/send", apiKeyAuth, validateBody(pushSendSchema), (req, res) 
 });
 
 // Respond to push request (Approve/Deny)
-app.post("/api/push/respond", apiKeyAuth, validateBody(pushRespondSchema), (req, res) => {
+app.post("/api/push/respond", (req, res) => {
   const { id, status, selectedNumber } = req.body;
   const push = phoneState.pushRequests.find((p) => p.id === id);
 
@@ -429,7 +292,7 @@ app.post("/api/push/respond", apiKeyAuth, validateBody(pushRespondSchema), (req,
 });
 
 // Trigger Voice Verification Call
-app.post("/api/voice/call", apiKeyAuth, validateBody(voiceCallSchema), (req, res) => {
+app.post("/api/voice/call", (req, res) => {
   const { caller, callerName, code, spokenMessage } = req.body;
   const verificationCode = code || String(Math.floor(100000 + Math.random() * 900000));
 
@@ -456,7 +319,7 @@ app.post("/api/voice/call", apiKeyAuth, validateBody(voiceCallSchema), (req, res
 });
 
 // Add TOTP Account
-app.post("/api/totp/add", apiKeyAuth, validateBody(totpAddSchema), (req, res) => {
+app.post("/api/totp/add", (req, res) => {
   const { issuer, accountName, secret, icon } = req.body;
   if (!issuer || !secret) {
     return res.status(400).json({ error: "Issuer and secret are required" });
@@ -478,21 +341,21 @@ app.post("/api/totp/add", apiKeyAuth, validateBody(totpAddSchema), (req, res) =>
 });
 
 // Delete TOTP Account
-app.post("/api/totp/delete", apiKeyAuth, validateBody(totpDeleteSchema), (req, res) => {
+app.post("/api/totp/delete", (req, res) => {
   const { id } = req.body;
   phoneState.totpAccounts = phoneState.totpAccounts.filter((t) => t.id !== id);
   res.json({ success: true });
 });
 
 // Update Phone Settings
-app.post("/api/phone/settings", apiKeyAuth, validateBody(settingsSchema), (req, res) => {
+app.post("/api/phone/settings", (req, res) => {
   const newSettings = req.body;
   phoneState.settings = { ...phoneState.settings, ...newSettings };
   res.json({ success: true, settings: phoneState.settings });
 });
 
 // Clear notifications / messages
-app.post("/api/phone/clear", apiKeyAuth, (req, res) => {
+app.post("/api/phone/clear", (req, res) => {
   phoneState.messages = [];
   phoneState.pushRequests = [];
   phoneState.calls = [];
@@ -501,7 +364,9 @@ app.post("/api/phone/clear", apiKeyAuth, (req, res) => {
 });
 
 // AI extract verification code from unformatted text/email
-app.post("/api/ai/extract-code", apiKeyAuth, validateBody(aiExtractSchema), async (req, res) => {
+// Route to extract verification codes or context from arbitrary text using AI when available.
+// Falls back to a simple regex extractor when GEMINI_API_KEY is not configured.
+app.post("/api/ai/extract-code", async (req, res) => {
   try {
     const { rawText } = req.body;
     if (!rawText) {

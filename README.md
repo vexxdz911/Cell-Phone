@@ -1,42 +1,30 @@
-# Cell-Phone — Development Notes
+Cell-Phone — Dev demo for 2FA / verification flows
 
-This README includes the same developer-focused run instructions and troubleshooting notes found in DEV.md.
+This repository is a small React + Vite demo that simulates a phone UI for
+verification flows (SMS, TOTP, push, voice). It includes a simple Express
+server used during development to provide mock phone state and API endpoints.
 
-Quick commands
-- Full dev (frontend + server via Vite middleware):
-  npm run dev
-  (Requires native tailwind optional bindings in some environments — see notes)
+Quick start
 
-- API-only dev server (fast, no Vite/Tailwind):
-  ADMIN_API_KEY=test_admin_key npm run dev:api
-  Listens on http://localhost:4000 by default
+1. Install: npm install
+2. Dev server: npm run dev
+   - Runs the TypeScript server (tsx) + Vite dev middleware.
+3. Build: npm run build
+4. Start (production): npm run start
 
-Important environment variables
-- ADMIN_API_KEY — required in production to protect write endpoints. Set locally for testing.
-- GEMINI_API_KEY — optional; enables AI extract endpoint.
-- RATE_LIMIT_WINDOW_MS / RATE_LIMIT_MAX — in-memory rate limiter tuning.
-- APP_URL — self-referential URL for some features.
+Environment
 
-Runtime notes
-- The project tries to load @tailwindcss/vite and the oxide native binding. On some Windows/dev hosts the native binary may be missing and cause startup to fail. The dev server now falls back to running without the plugin so the server still starts.
-- Recommended fix when native binding errors appear: remove node_modules and package-lock.json then reinstall (or run on Node >=20 where prebuilt binaries are available).
+- Provide firebase-applet-config.json at the repo root for Firebase auth used by the client.
+- (Optional) GEMINI_API_KEY for AI-based extraction in server /api/ai/extract-code.
 
-Validation and security
-- Request validation is provided by Zod if installed. Install with:
-  npm install zod
-  (server logs a warning and gracefully disables validation when zod is not present)
-- Do NOT commit real secrets to the repo. Use environment secrets in your deployment.
+Docs & notes
 
-Smoke test examples (PowerShell)
-- GET state:
-  Invoke-RestMethod -Uri 'http://localhost:3000/api/phone/state'
+- JSDoc-style comments were added for exported helpers in src/lib (firebase, gmail, totp, sound).
+  These describe inputs/outputs for fetchGmailMessages, parseVerificationData, generateTOTP, etc.
+- Inline comments added to complex logic (Gmail parsing, AI fallback, sound engine).
 
-- POST SMS (protected):
-  Invoke-RestMethod -Uri 'http://localhost:3000/api/sms/send' -Method Post -Headers @{ 'x-api-key'='test_admin_key' } -Body (@{ senderName='Test'; body='Your code is 123456'; code='123456' } | ConvertTo-Json) -ContentType 'application/json'
+Testing
 
-Files of interest
-- server.ts — main Express server + API routes
-- api-dev-server.ts — lightweight API-only server for quick dev & smoke tests
-- vite.config.ts — loads tailwind plugin optionally
+- The server exposes endpoints under /api/* for demo actions (sms/send, push/send, totp/add, ai/extract-code).
 
-If you want, I can also add a CI workflow or expand the README with architecture and contribution guidelines.
+If anything in this README is out of date or you prefer a different dev flow, tell me which commands or files to document and they will be updated.

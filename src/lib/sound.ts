@@ -1,3 +1,8 @@
+/**
+ * Simple browser sound engine helpers using the Web Audio API and SpeechSynthesis.
+ * Provides small notification sounds (SMS ping, success chime, denied buzz), keypad clicks,
+ * and a helper to speak verification codes for voice call simulations.
+ */
 class SoundEngine {
   private ctx: AudioContext | null = null;
 
@@ -106,6 +111,13 @@ class SoundEngine {
   }
 
   // Speech Synthesis to read out voice call verification codes
+  /**
+   * Speak a verification code or message using the browser SpeechSynthesis API.
+   * Rate and pitch are tuned for clarity when reading numeric codes.
+   * No-op on environments without `window.speechSynthesis`.
+   *
+   * @param text Text to speak aloud (e.g. spaced digits).
+   */
   speakVerificationCode(text: string) {
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
       window.speechSynthesis.cancel();

@@ -60,7 +60,17 @@ function extractBodyParts(payload: any): string {
   return '';
 }
 
-// Extract 2FA code or magic link from message text
+/**
+ * Parse verification data (OTP code or magic link) from message text.
+ *
+ * Combines subject and body to increase detection coverage and returns any
+ * matched numeric code (4-8 digits), a discovered magic link URL, and a
+ * boolean indicating whether the message looks like a verification email.
+ *
+ * @param text Message body text to search.
+ * @param subject Message subject to include in the search.
+ * @returns An object with { code?, magicLink?, isVerificationEmail }.
+ */
 export function parseVerificationData(text: string, subject: string) {
   const combined = `${subject} ${text}`;
 
@@ -80,6 +90,14 @@ export function parseVerificationData(text: string, subject: string) {
 }
 
 // List messages from Gmail API
+/**
+ * Fetch a list of Gmail messages (metadata) then retrieve their details.
+ *
+ * @param accessToken OAuth2 access token with Gmail scopes.
+ * @param query Optional Gmail query string to filter messages.
+ * @param maxResults Maximum number of messages to return (default 15).
+ * @returns Array of parsed messages (subject, from, body, code, magicLink, etc.).
+ */
 export async function fetchGmailMessages(
   accessToken: string,
   query: string = '',
@@ -116,6 +134,13 @@ export async function fetchGmailMessages(
 }
 
 // Fetch single message details
+/**
+ * Fetch detailed Gmail message by ID and parse headers/body into a structured format.
+ *
+ * @param accessToken OAuth2 access token with Gmail scopes.
+ * @param messageId Gmail message ID to retrieve.
+ * @returns ParsedGmailMessage or null if parsing fails.
+ */
 export async function fetchGmailMessageDetails(
   accessToken: string,
   messageId: string
@@ -165,6 +190,15 @@ export async function fetchGmailMessageDetails(
 }
 
 // Send Email via Gmail API
+/**
+ * Send an email using the Gmail API by composing a raw RFC822 message encoded in base64url.
+ *
+ * @param accessToken OAuth2 access token with Gmail send scope.
+ * @param to Recipient email address.
+ * @param subject Email subject.
+ * @param body HTML body of the message.
+ * @returns true on success, otherwise throws.
+ */
 export async function sendGmailEmail(
   accessToken: string,
   to: string,
@@ -206,6 +240,13 @@ export async function sendGmailEmail(
 }
 
 // Trash Message via Gmail API
+/**
+ * Move a Gmail message to Trash using the Gmail API.
+ *
+ * @param accessToken OAuth2 access token with Gmail scopes.
+ * @param messageId Gmail message ID to trash.
+ * @returns true when the API responds with ok status.
+ */
 export async function trashGmailMessage(accessToken: string, messageId: string): Promise<boolean> {
   const res = await fetch(
     `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}/trash`,

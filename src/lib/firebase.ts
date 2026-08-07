@@ -30,7 +30,13 @@ GMAIL_SCOPES.forEach((scope) => provider.addScope(scope));
 let isSigningIn = false;
 let cachedAccessToken: string | null = null;
 
-// Initialize auth state listener
+/**
+ * Initialize Firebase authentication state listener.
+ *
+ * @param onAuthSuccess Optional callback invoked with (user, accessToken) when a user is signed in and a cached access token exists.
+ * @param onAuthFailure Optional callback invoked when no valid auth state or re-auth is required (e.g., after a refresh).
+ * @returns Unsubscribe function from Firebase onAuthStateChanged.
+ */
 export const initAuth = (
   onAuthSuccess?: (user: User, token: string) => void,
   onAuthFailure?: () => void
@@ -50,7 +56,11 @@ export const initAuth = (
   });
 };
 
-// Sign in with Google Popup
+/**
+ * Sign in the user using Google OAuth popup and cache the access token.
+ *
+ * @returns An object containing the Firebase User and OAuth accessToken, or throws on failure.
+ */
 export const googleSignIn = async (): Promise<{ user: User; accessToken: string } | null> => {
   try {
     isSigningIn = true;
@@ -70,10 +80,18 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
   }
 };
 
+/**
+ * Retrieve the cached Google OAuth access token (if available).
+ *
+ * @returns The cached access token string or null when no token is present.
+ */
 export const getAccessToken = (): string | null => {
   return cachedAccessToken;
 };
 
+/**
+ * Sign out the current user and clear any cached access token.
+ */
 export const logout = async () => {
   await signOut(auth);
   cachedAccessToken = null;
