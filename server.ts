@@ -3,7 +3,7 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import { PhoneState, SMSMessage, TOTPAccount, PushRequest, VoiceCall } from "./src/types";
-import { createRequire } from 'module';
+import { validateBody, smsSendSchema, webhookSchema, pushSendSchema, pushRespondSchema, voiceCallSchema, totpAddSchema, totpDeleteSchema, settingsSchema, aiExtractSchema } from "./src/validation";
 
 const app = express();
 const PORT = 3000;
@@ -60,88 +60,6 @@ function apiKeyAuth(req: any, res: any, next: any) {
   next();
 }
 
-// Dynamic payload validation: attempt to load Zod at runtime. If unavailable, validation is disabled and a warning is logged.
-let validateBody: any;
-let smsSendSchema: any, webhookSchema: any, pushSendSchema: any, pushRespondSchema: any, voiceCallSchema: any, totpAddSchema: any, totpDeleteSchema: any, settingsSchema: any, aiExtractSchema: any;
-try {
-  const require2 = createRequire(import.meta.url);
-  const Z = require2('zod');
-
-  smsSendSchema = Z.object({
-    sender: Z.string().optional(),
-    senderName: Z.string().optional(),
-    body: Z.string().optional(),
-    code: Z.string().min(1).max(64).optional(),
-    link: Z.string().url().optional(),
-    externalApp: Z.string().optional(),
-  });
-
-  webhookSchema = Z.object({
-    appName: Z.string().optional(),
-    senderName: Z.string().optional(),
-    body: Z.string().optional(),
-    code: Z.string().min(1).max(64).optional(),
-    magicLink: Z.string().url().optional(),
-    type: Z.string().optional(),
-    service: Z.string().optional(),
-  });
-
-  pushSendSchema = Z.object({
-    service: Z.string().optional(),
-    location: Z.string().optional(),
-    ipAddress: Z.string().optional(),
-    promptType: Z.enum(['simple', 'number_matching']).optional(),
-    matchingNumber: Z.number().optional(),
-  });
-
-  pushRespondSchema = Z.object({
-    id: Z.string(),
-    status: Z.enum(['approved', 'denied']),
-    selectedNumber: Z.number().optional(),
-  });
-
-  voiceCallSchema = Z.object({
-    caller: Z.string().optional(),
-    callerName: Z.string().optional(),
-    code: Z.string().min(1).max(64).optional(),
-    spokenMessage: Z.string().optional(),
-  });
-
-  totpAddSchema = Z.object({
-    issuer: Z.string().min(1),
-    accountName: Z.string().optional(),
-    secret: Z.string().min(8),
-    icon: Z.string().optional(),
-  });
-
-  totpDeleteSchema = Z.object({ id: Z.string() });
-
-  settingsSchema = Z.object({
-    phoneNumber: Z.string().optional(),
-    carrier: Z.string().optional(),
-    wallpaper: Z.string().optional(),
-    theme: Z.string().optional(),
-    soundEnabled: Z.boolean().optional(),
-    hapticsEnabled: Z.boolean().optional(),
-    autoCopyOTP: Z.boolean().optional(),
-    modelStyle: Z.string().optional(),
-  });
-
-  aiExtractSchema = Z.object({ rawText: Z.string().min(1) });
-
-  validateBody = (schema: any) => (req: any, res: any, next: any) => {
-    const result = schema.safeParse(req.body);
-    if (!result.success) {
-      return res.status(400).json({ error: 'Invalid request payload', details: result.error.format() });
-    }
-    req.body = result.data;
-    next();
-  };
-} catch (err) {
-  console.warn('Zod not installed or failed to load; request validation disabled. Run `npm install zod` to enable.');
-  // No-op validator when zod is not available
-  validateBody = (_: any) => (req: any, res: any, next: any) => next();
-}
 
 // Apply rate limiter globally to /api endpoints
 app.use('/api', rateLimiter);
