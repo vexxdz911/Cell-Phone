@@ -20,13 +20,30 @@ jobs:
           pwd
           ls -la
 
-      - name: Install dependencies
+      - name: Install dependencies (capture logs)
         run: |
+          set -o pipefail
           npm config set unsafe-perm true
-          npm ci --legacy-peer-deps || npm install --legacy-peer-deps
+          echo "Starting npm ci (with legacy-peer-deps). Output to install.log"
+          (npm ci --legacy-peer-deps 2>&1) | tee install.log || true
+      - name: Upload install log
+        uses: actions/upload-artifact@v4
+        with:
+          name: install-log
+          path: install.log
 
-      - name: Install optional dev dependency (Zod) for validation checks
-        run: npm install zod --no-audit --no-fund || true
+      - name: Install optional dev dependency (Zod) for validation checks (with retries)
+        run: |
+          set -o pipefail
+          for i in 1 2 3; do
+            echo "Attempt $i: installing zod"
+            npm install zod --no-audit --no-fund 2>&1 | tee zod-install.log && break || sleep 5
+          done || true
+      - name: Upload zod install log
+        uses: actions/upload-artifact@v4
+        with:
+          name: zod-install-log
+          path: zod-install.log
 
       - name: Build (capture logs)
         run: |
