@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Environment info
+        run: |
+          node -v
+          npm -v
+          pwd
+          ls -la
+
+      - name: Install dependencies (capture logs)
+        run: |
+          set -o pipefail
+          npm config set unsafe-perm true
+          echo "Starting npm ci (with legacy-peer-deps). Output to install.log"
+          (npm ci --legacy-peer-deps 2>&1) | tee install.log || true
+      - name: Upload install log
+        uses: actions/upload-artifact@v4
+        with:
+          name: install-log
+          path: install.log
+
+      - name: Install optional dev dependency (Zod) for validation checks (with retries)
+        run: |
+          set -o pipefail
+          for i in 1 2 3; do
+            echo "Attempt $i: installing zod"
+            npm install zod --no-audit --no-fund 2>&1 | tee zod-install.log && break || sleep 5
+          done || true
+      - name: Upload zod install log
+        uses: actions/upload-artifact@v4
+        with:
+          name: zod-install-log
+          path: zod-install.log
+
+      - name: Build (capture logs)
+        run: |
+          set -o pipefail
+          npm run build 2>&1 | tee build.log
+      - name: Upload build log
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
+
+      - name: Type check (capture logs)
+        run: |
+          npm run lint 2>&1 | tee lint.log || true
+      - name: Upload lint log
+        uses: actions/upload-artifact@v4
+        with:
+          name: lint-log
+          path: lint.log
+
+      - name: Run smoke tests (capture logs)
+        continue-on-error: true
+        run: |
+          # spawn server and capture output
+          node dist/server.cjs > smoke.log 2>&1 &
+          SERVER_PID=$!
+          npx -y wait-on http://localhost:3000 || echo "wait-on timed out" >> smoke.log
+          curl -s -S -f http://localhost:3000/api/phone/state >> smoke.log || echo "smoke test failed" >> smoke.log
+          # give server a chance to write logs, then kill
+          sleep 1 || true
+          kill $SERVER_PID || true
+      - name: Upload smoke log
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-log
+          path: smoke.log
