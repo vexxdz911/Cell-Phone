@@ -3,7 +3,7 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import { PhoneState, SMSMessage, TOTPAccount, PushRequest, VoiceCall } from "./src/types";
-import { z } from 'zod';
+import { createRequire } from 'module';
 
 const app = express();
 const PORT = 3000;
@@ -60,71 +60,76 @@ function apiKeyAuth(req: any, res: any, next: any) {
   next();
 }
 
-// Validation schemas and helper (Zod)
-const smsSendSchema = z.object({
-  sender: z.string().optional(),
-  senderName: z.string().optional(),
-  body: z.string().optional(),
-  code: z.string().min(1).max(64).optional(),
-  link: z.string().url().optional(),
-  externalApp: z.string().optional(),
-});
+// Dynamic payload validation: attempt to load Zod at runtime. If unavailable, validation is disabled and a warning is logged.
+let validateBody: any;
+let smsSendSchema: any, webhookSchema: any, pushSendSchema: any, pushRespondSchema: any, voiceCallSchema: any, totpAddSchema: any, totpDeleteSchema: any, settingsSchema: any, aiExtractSchema: any;
+try {
+  const require2 = createRequire(import.meta.url);
+  const Z = require2('zod');
 
-const webhookSchema = z.object({
-  appName: z.string().optional(),
-  senderName: z.string().optional(),
-  body: z.string().optional(),
-  code: z.string().min(1).max(64).optional(),
-  magicLink: z.string().url().optional(),
-  type: z.string().optional(),
-  service: z.string().optional(),
-});
+  smsSendSchema = Z.object({
+    sender: Z.string().optional(),
+    senderName: Z.string().optional(),
+    body: Z.string().optional(),
+    code: Z.string().min(1).max(64).optional(),
+    link: Z.string().url().optional(),
+    externalApp: Z.string().optional(),
+  });
 
-const pushSendSchema = z.object({
-  service: z.string().optional(),
-  location: z.string().optional(),
-  ipAddress: z.string().optional(),
-  promptType: z.enum(['simple', 'number_matching']).optional(),
-  matchingNumber: z.number().optional(),
-});
+  webhookSchema = Z.object({
+    appName: Z.string().optional(),
+    senderName: Z.string().optional(),
+    body: Z.string().optional(),
+    code: Z.string().min(1).max(64).optional(),
+    magicLink: Z.string().url().optional(),
+    type: Z.string().optional(),
+    service: Z.string().optional(),
+  });
 
-const pushRespondSchema = z.object({
-  id: z.string(),
-  status: z.enum(['approved', 'denied']),
-  selectedNumber: z.number().optional(),
-});
+  pushSendSchema = Z.object({
+    service: Z.string().optional(),
+    location: Z.string().optional(),
+    ipAddress: Z.string().optional(),
+    promptType: Z.enum(['simple', 'number_matching']).optional(),
+    matchingNumber: Z.number().optional(),
+  });
 
-const voiceCallSchema = z.object({
-  caller: z.string().optional(),
-  callerName: z.string().optional(),
-  code: z.string().min(1).max(64).optional(),
-  spokenMessage: z.string().optional(),
-});
+  pushRespondSchema = Z.object({
+    id: Z.string(),
+    status: Z.enum(['approved', 'denied']),
+    selectedNumber: Z.number().optional(),
+  });
 
-const totpAddSchema = z.object({
-  issuer: z.string().min(1),
-  accountName: z.string().optional(),
-  secret: z.string().min(8),
-  icon: z.string().optional(),
-});
+  voiceCallSchema = Z.object({
+    caller: Z.string().optional(),
+    callerName: Z.string().optional(),
+    code: Z.string().min(1).max(64).optional(),
+    spokenMessage: Z.string().optional(),
+  });
 
-const totpDeleteSchema = z.object({ id: z.string() });
+  totpAddSchema = Z.object({
+    issuer: Z.string().min(1),
+    accountName: Z.string().optional(),
+    secret: Z.string().min(8),
+    icon: Z.string().optional(),
+  });
 
-const settingsSchema = z.object({
-  phoneNumber: z.string().optional(),
-  carrier: z.string().optional(),
-  wallpaper: z.string().optional(),
-  theme: z.string().optional(),
-  soundEnabled: z.boolean().optional(),
-  hapticsEnabled: z.boolean().optional(),
-  autoCopyOTP: z.boolean().optional(),
-  modelStyle: z.string().optional(),
-});
+  totpDeleteSchema = Z.object({ id: Z.string() });
 
-const aiExtractSchema = z.object({ rawText: z.string().min(1) });
+  settingsSchema = Z.object({
+    phoneNumber: Z.string().optional(),
+    carrier: Z.string().optional(),
+    wallpaper: Z.string().optional(),
+    theme: Z.string().optional(),
+    soundEnabled: Z.boolean().optional(),
+    hapticsEnabled: Z.boolean().optional(),
+    autoCopyOTP: Z.boolean().optional(),
+    modelStyle: Z.string().optional(),
+  });
 
-function validateBody(schema: any) {
-  return (req: any, res: any, next: any) => {
+  aiExtractSchema = Z.object({ rawText: Z.string().min(1) });
+
+  validateBody = (schema: any) => (req: any, res: any, next: any) => {
     const result = schema.safeParse(req.body);
     if (!result.success) {
       return res.status(400).json({ error: 'Invalid request payload', details: result.error.format() });
@@ -132,6 +137,10 @@ function validateBody(schema: any) {
     req.body = result.data;
     next();
   };
+} catch (err) {
+  console.warn('Zod not installed or failed to load; request validation disabled. Run `npm install zod` to enable.');
+  // No-op validator when zod is not available
+  validateBody = (_: any) => (req: any, res: any, next: any) => next();
 }
 
 // Apply rate limiter globally to /api endpoints
