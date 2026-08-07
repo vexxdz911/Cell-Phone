@@ -3,6 +3,7 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import { PhoneState, SMSMessage, TOTPAccount, PushRequest, VoiceCall } from "./src/types";
+import { z } from 'zod';
 
 const app = express();
 const PORT = 3000;
@@ -57,6 +58,80 @@ function apiKeyAuth(req: any, res: any, next: any) {
     return res.status(401).json({ error: 'Unauthorized: invalid API key' });
   }
   next();
+}
+
+// Validation schemas and helper (Zod)
+const smsSendSchema = z.object({
+  sender: z.string().optional(),
+  senderName: z.string().optional(),
+  body: z.string().optional(),
+  code: z.string().min(1).max(64).optional(),
+  link: z.string().url().optional(),
+  externalApp: z.string().optional(),
+});
+
+const webhookSchema = z.object({
+  appName: z.string().optional(),
+  senderName: z.string().optional(),
+  body: z.string().optional(),
+  code: z.string().min(1).max(64).optional(),
+  magicLink: z.string().url().optional(),
+  type: z.string().optional(),
+  service: z.string().optional(),
+});
+
+const pushSendSchema = z.object({
+  service: z.string().optional(),
+  location: z.string().optional(),
+  ipAddress: z.string().optional(),
+  promptType: z.enum(['simple', 'number_matching']).optional(),
+  matchingNumber: z.number().optional(),
+});
+
+const pushRespondSchema = z.object({
+  id: z.string(),
+  status: z.enum(['approved', 'denied']),
+  selectedNumber: z.number().optional(),
+});
+
+const voiceCallSchema = z.object({
+  caller: z.string().optional(),
+  callerName: z.string().optional(),
+  code: z.string().min(1).max(64).optional(),
+  spokenMessage: z.string().optional(),
+});
+
+const totpAddSchema = z.object({
+  issuer: z.string().min(1),
+  accountName: z.string().optional(),
+  secret: z.string().min(8),
+  icon: z.string().optional(),
+});
+
+const totpDeleteSchema = z.object({ id: z.string() });
+
+const settingsSchema = z.object({
+  phoneNumber: z.string().optional(),
+  carrier: z.string().optional(),
+  wallpaper: z.string().optional(),
+  theme: z.string().optional(),
+  soundEnabled: z.boolean().optional(),
+  hapticsEnabled: z.boolean().optional(),
+  autoCopyOTP: z.boolean().optional(),
+  modelStyle: z.string().optional(),
+});
+
+const aiExtractSchema = z.object({ rawText: z.string().min(1) });
+
+function validateBody(schema: any) {
+  return (req: any, res: any, next: any) => {
+    const result = schema.safeParse(req.body);
+    if (!result.success) {
+      return res.status(400).json({ error: 'Invalid request payload', details: result.error.format() });
+    }
+    req.body = result.data;
+    next();
+  };
 }
 
 // Apply rate limiter globally to /api endpoints
@@ -168,7 +243,7 @@ app.get("/api/phone/state", (req, res) => {
 });
 
 // Trigger SMS Code
-app.post("/api/sms/send", apiKeyAuth, (req, res) => {
+app.post("/api/sms/send", apiKeyAuth, validateBody(smsSendSchema), (req, res) => {
   const { sender, senderName, body, code, link, externalApp } = req.body;
   
   // Extract 6 digit or 4-8 digit number if code not explicitly provided
@@ -213,7 +288,7 @@ app.post("/api/sms/send", apiKeyAuth, (req, res) => {
 });
 
 // Generic Inbound Webhook / External App Verification Endpoint
-app.post(["/api/webhook/2fa", "/api/integration/send-code"], apiKeyAuth, (req, res) => {
+app.post(["/api/webhook/2fa", "/api/integration/send-code"], apiKeyAuth, validateBody(webhookSchema), (req, res) => {
   const { appName, senderName, body, code, magicLink, type, service } = req.body;
   const sourceApp = appName || senderName || service || "External Application";
 
@@ -286,7 +361,7 @@ app.post(["/api/webhook/2fa", "/api/integration/send-code"], apiKeyAuth, (req, r
 });
 
 // Trigger Push Approval Request
-app.post("/api/push/send", apiKeyAuth, (req, res) => {
+app.post("/api/push/send", apiKeyAuth, validateBody(pushSendSchema), (req, res) => {
   const { service, location, ipAddress, promptType, matchingNumber } = req.body;
 
   let numbers: number[] = [];
@@ -325,7 +400,7 @@ app.post("/api/push/send", apiKeyAuth, (req, res) => {
 });
 
 // Respond to push request (Approve/Deny)
-app.post("/api/push/respond", apiKeyAuth, (req, res) => {
+app.post("/api/push/respond", apiKeyAuth, validateBody(pushRespondSchema), (req, res) => {
   const { id, status, selectedNumber } = req.body;
   const push = phoneState.pushRequests.find((p) => p.id === id);
 
@@ -345,7 +420,7 @@ app.post("/api/push/respond", apiKeyAuth, (req, res) => {
 });
 
 // Trigger Voice Verification Call
-app.post("/api/voice/call", apiKeyAuth, (req, res) => {
+app.post("/api/voice/call", apiKeyAuth, validateBody(voiceCallSchema), (req, res) => {
   const { caller, callerName, code, spokenMessage } = req.body;
   const verificationCode = code || String(Math.floor(100000 + Math.random() * 900000));
 
@@ -372,7 +447,7 @@ app.post("/api/voice/call", apiKeyAuth, (req, res) => {
 });
 
 // Add TOTP Account
-app.post("/api/totp/add", apiKeyAuth, (req, res) => {
+app.post("/api/totp/add", apiKeyAuth, validateBody(totpAddSchema), (req, res) => {
   const { issuer, accountName, secret, icon } = req.body;
   if (!issuer || !secret) {
     return res.status(400).json({ error: "Issuer and secret are required" });
@@ -394,14 +469,14 @@ app.post("/api/totp/add", apiKeyAuth, (req, res) => {
 });
 
 // Delete TOTP Account
-app.post("/api/totp/delete", apiKeyAuth, (req, res) => {
+app.post("/api/totp/delete", apiKeyAuth, validateBody(totpDeleteSchema), (req, res) => {
   const { id } = req.body;
   phoneState.totpAccounts = phoneState.totpAccounts.filter((t) => t.id !== id);
   res.json({ success: true });
 });
 
 // Update Phone Settings
-app.post("/api/phone/settings", apiKeyAuth, (req, res) => {
+app.post("/api/phone/settings", apiKeyAuth, validateBody(settingsSchema), (req, res) => {
   const newSettings = req.body;
   phoneState.settings = { ...phoneState.settings, ...newSettings };
   res.json({ success: true, settings: phoneState.settings });
@@ -417,7 +492,7 @@ app.post("/api/phone/clear", apiKeyAuth, (req, res) => {
 });
 
 // AI extract verification code from unformatted text/email
-app.post("/api/ai/extract-code", apiKeyAuth, async (req, res) => {
+app.post("/api/ai/extract-code", apiKeyAuth, validateBody(aiExtractSchema), async (req, res) => {
   try {
     const { rawText } = req.body;
     if (!rawText) {
